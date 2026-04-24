@@ -95,7 +95,7 @@ func main() {
 		for event := range events {
 			fmt.Println(event)
 		}
-	}()
+  }()
   
   supervisor.Wait()
   pubsub.Close()
