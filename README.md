@@ -67,37 +67,37 @@ import (
 )
 
 func main() {
-  ctx, cancel := context.WithCancel(context.Background())
-  defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-  pubsub := pubsub.New[string, sse.Event](10)
-  
-  handler := func(sse.Event event) {
-    pubsub.Publish("sse", event)
-  }
-  
-  actor := sse.NewActor("http://localhost:8080", handler,
-    sse.WithTimeout(10 * time.Second),
-  )
+	pubsub := pubsub.New[string, sse.Event](10)
 
-  supervisor := sup.NewSupervisor(
-    sup.WithActor(actor),
-    sup.WithPolicy(sup.Permanent),
-    sup.WithRestartDelay(time.Second),
-    sup.WithRestartLimit(5, 10 * time.Second),
-  )
+	handler := func(sse.Event event) {
+		pubsub.Publish("sse", event)
+	}
   
-  go supervisor.Run(ctx)
+	actor := sse.NewActor("http://localhost:8080", handler,
+		sse.WithTimeout(10 * time.Second),
+	)
+
+	supervisor := sup.NewSupervisor(
+		sup.WithActor(actor),
+		sup.WithPolicy(sup.Permanent),
+		sup.WithRestartDelay(time.Second),
+		sup.WithRestartLimit(5, 10 * time.Second),
+	)
   
-  events := pubsub.Subscribe(ctx, "sse")
+	go supervisor.Run(ctx)
   
-  go func() {
-  	for event := range events {
-   		fmt.Println(event)
-   	}
-  }()
+	events := pubsub.Subscribe(ctx, "sse")
   
-  supervisor.Wait()
-  pubsub.Close()
+	go func() {
+		for event := range events {
+			fmt.Println(event)
+		}
+	}()
+  
+	supervisor.Wait()
+	pubsub.Close()
 }
 ```
