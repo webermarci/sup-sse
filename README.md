@@ -50,3 +50,54 @@ func main() {
 	supervisor.Wait()
 }
 ```
+
+## Using it with [pubsub](https://github.com/webermarci/pubsub)
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+
+    "github.com/webermarci/pubsub"
+    "github.com/webermarci/sup"
+    sse "github.com/webermarci/sup-sse"
+)
+
+func main() {
+  ctx, cancel := context.WithCancel(context.Background())
+  defer cancel()
+
+  pubsub := pubsub.New[string, sse.Event](10)
+  
+  handler := func(sse.Event event) {
+    pubsub.Publish("sse", event)
+  }
+  
+  actor := sse.NewActor("http://localhost:8080", handler,
+    sse.WithTimeout(10 * time.Second),
+  )
+
+  supervisor := sup.NewSupervisor(
+    sup.WithActor(actor),
+    sup.WithPolicy(sup.Permanent),
+    sup.WithRestartDelay(time.Second),
+    sup.WithRestartLimit(5, 10 * time.Second),
+  )
+  
+  go supervisor.Run(ctx)
+  
+  events := pubsub.Subscribe(ctx, "sse")
+  
+  go func() {
+		for event := range events {
+			fmt.Println(event)
+		}
+	}()
+  
+  supervisor.Wait()
+  pubsub.Close()
+}
+```
