@@ -92,9 +92,9 @@ func main() {
   events := pubsub.Subscribe(ctx, "sse")
   
   go func() {
-		for event := range events {
-			fmt.Println(event)
-		}
+  	for event := range events {
+   		fmt.Println(event)
+   	}
   }()
   
   supervisor.Wait()
