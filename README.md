@@ -35,12 +35,12 @@ func main() {
 		fmt.Println(event)
 	}
 	
-	client := sse.NewSSEActor("http://localhost:8080", handler,
+	actor := sse.NewActor("http://localhost:8080", handler,
 		sse.WithTimeout(10 * time.Second),
 	)
 
 	supervisor := sup.NewSupervisor(
-		sup.WithActor(client),
+		sup.WithActor(actor),
 		sup.WithPolicy(sup.Permanent),
 		sup.WithRestartDelay(time.Second),
 		sup.WithRestartLimit(5, 10 * time.Second),

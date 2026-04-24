@@ -26,32 +26,32 @@ type Event struct {
 	Name string
 }
 
-// SSEActor connects to an SSE endpoint, processes incoming events, and notifies an optional observer about connection status and received events.
-type SSEActorOption func(*SSEActor)
+// ActorOption defines a function type for configuring an Actor with various options such as timeout duration, observer assignment, and custom HTTP client.
+type ActorOption func(*Actor)
 
 // WithTimeout sets the duration after which the SSE connection will be considered timed out if no events are received.
-func WithTimeout(d time.Duration) SSEActorOption {
-	return func(a *SSEActor) {
+func WithTimeout(d time.Duration) ActorOption {
+	return func(a *Actor) {
 		a.timeout = d
 	}
 }
 
-// WithObserver assigns an Observer to the SSEActor, allowing it to receive notifications about connection status and events.
-func WithObserver(observer Observer) SSEActorOption {
-	return func(a *SSEActor) {
+// WithObserver assigns an Observer to the Actor, allowing it to receive notifications about connection status and events.
+func WithObserver(observer Observer) ActorOption {
+	return func(a *Actor) {
 		a.observer = observer
 	}
 }
 
 // WithHTTPClient allows the caller to provide a custom http.Client for making requests to the SSE endpoint, enabling configuration of timeouts, transport settings, etc.
-func WithHTTPClient(c *http.Client) SSEActorOption {
-	return func(a *SSEActor) {
+func WithHTTPClient(c *http.Client) ActorOption {
+	return func(a *Actor) {
 		a.client = c
 	}
 }
 
-// SSEActor is responsible for connecting to an SSE endpoint, reading and parsing incoming events, and invoking a handler function for each event. It also supports notifying an optional Observer about connection status and received events.
-type SSEActor struct {
+// Actor is responsible for connecting to an SSE endpoint, reading and parsing incoming events, and invoking a handler function for each event. It also supports notifying an optional Observer about connection status and received events.
+type Actor struct {
 	url      string
 	timeout  time.Duration
 	lastID   string
@@ -60,9 +60,9 @@ type SSEActor struct {
 	observer Observer
 }
 
-// NewSSEActor creates a new SSEActor with the specified URL, event handler, and optional configuration options. The handler function will be called for each received event, and the options can be used to customize the connection timeout, assign an Observer, or provide a custom HTTP client.
-func NewSSEActor(url string, handler func(Event), opts ...SSEActorOption) *SSEActor {
-	a := &SSEActor{
+// NewActor creates a new Actor with the specified URL, event handler, and optional configuration options. The handler function will be called for each received event, and the options can be used to customize the connection timeout, assign an Observer, or provide a custom HTTP client.
+func NewActor(url string, handler func(Event), opts ...ActorOption) *Actor {
+	a := &Actor{
 		url:     url,
 		handler: handler,
 		timeout: 30 * time.Second,
@@ -81,7 +81,7 @@ func NewSSEActor(url string, handler func(Event), opts ...SSEActorOption) *SSEAc
 }
 
 // Run establishes a connection to the SSE endpoint and processes incoming events until the context is canceled or an error occurs. It handles connection setup, event parsing, and error handling, while also notifying the Observer about connection status and received events.
-func (a *SSEActor) Run(ctx context.Context) (err error) {
+func (a *Actor) Run(ctx context.Context) (err error) {
 	if a.observer != nil {
 		a.observer.OnConnect(a.url, a.lastID)
 	}

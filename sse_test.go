@@ -25,7 +25,7 @@ func TestSSEActor_Parser(t *testing.T) {
 		close(done)
 	}
 
-	actor := NewSSEActor(server.URL, handler, WithHTTPClient(&http.Client{}))
+	actor := NewActor(server.URL, handler, WithHTTPClient(&http.Client{}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -51,7 +51,7 @@ func TestSSEActor_WatchdogTimeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	actor := NewSSEActor(server.URL, func(e Event) {}, WithTimeout(100*time.Millisecond), WithHTTPClient(&http.Client{}))
+	actor := NewActor(server.URL, func(e Event) {}, WithTimeout(100*time.Millisecond), WithHTTPClient(&http.Client{}))
 
 	err := actor.Run(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "timed out") {
@@ -82,7 +82,7 @@ func TestSSEActor_LastEventID_Persistence(t *testing.T) {
 	}))
 	defer server.Close()
 
-	actor := NewSSEActor(server.URL, func(e Event) {}, WithHTTPClient(&http.Client{}))
+	actor := NewActor(server.URL, func(e Event) {}, WithHTTPClient(&http.Client{}))
 
 	ctx1, cancel1 := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel1()
