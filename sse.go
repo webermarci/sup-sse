@@ -4,20 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"errors"
+	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
-)
 
-// Observer defines the interface for receiving SSE events and connection status updates.
-type Observer interface {
-	OnConnect(url string, lastEventID string)
-	OnEvent(event Event, duration time.Duration)
-	OnFailure(err error)
-}
+	"github.com/webermarci/sup"
+)
 
 // Event represents a single SSE event with its ID, data, and optional name.
 type Event struct {
@@ -26,7 +21,7 @@ type Event struct {
 	Name string
 }
 
-// ActorOption defines a function type for configuring an Actor with various options such as timeout duration, observer assignment, and custom HTTP client.
+// ActorOption defines a function type for configuring an Actor.
 type ActorOption func(*Actor)
 
 // WithTimeout sets the duration after which the SSE connection will be considered timed out if no events are received.
@@ -36,36 +31,56 @@ func WithTimeout(d time.Duration) ActorOption {
 	}
 }
 
-// WithObserver assigns an Observer to the Actor, allowing it to receive notifications about connection status and events.
-func WithObserver(observer Observer) ActorOption {
+// WithLastEventID sets the initial Last-Event-ID to be used when connecting.
+func WithLastEventID(id string) ActorOption {
 	return func(a *Actor) {
-		a.observer = observer
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		a.lastID = id
 	}
 }
 
-// WithHTTPClient allows the caller to provide a custom http.Client for making requests to the SSE endpoint, enabling configuration of timeouts, transport settings, etc.
+// WithOnConnect allows the caller to provide a callback function that will be invoked when the Actor successfully connects to the SSE endpoint.
+func WithOnConnect(handler func(url string, lastID string)) ActorOption {
+	return func(a *Actor) {
+		a.onConnect = handler
+	}
+}
+
+// WithOnError allows the caller to provide a callback function that will be invoked whenever an error occurs during the Actor's operation.
+func WithOnError(handler func(error)) ActorOption {
+	return func(a *Actor) {
+		a.onError = handler
+	}
+}
+
+// WithHTTPClient allows the caller to provide a custom http.Client for making requests to the SSE endpoint.
 func WithHTTPClient(c *http.Client) ActorOption {
 	return func(a *Actor) {
 		a.client = c
 	}
 }
 
-// Actor is responsible for connecting to an SSE endpoint, reading and parsing incoming events, and invoking a handler function for each event. It also supports notifying an optional Observer about connection status and received events.
+// Actor is responsible for connecting to an SSE endpoint, reading and parsing incoming events, and invoking a handler function for each event.
 type Actor struct {
-	url      string
-	timeout  time.Duration
-	lastID   string
-	client   *http.Client
-	handler  func(Event)
-	observer Observer
+	*sup.BaseActor
+	url       string
+	timeout   time.Duration
+	client    *http.Client
+	lastID    string
+	onConnect func(url string, lastID string)
+	onEvent   func(Event)
+	onError   func(error)
+	mu        sync.RWMutex
 }
 
-// NewActor creates a new Actor with the specified URL, event handler, and optional configuration options. The handler function will be called for each received event, and the options can be used to customize the connection timeout, assign an Observer, or provide a custom HTTP client.
-func NewActor(url string, handler func(Event), opts ...ActorOption) *Actor {
+// NewActor creates a new Actor with the specified URL, event handler, and optional configuration options.
+func NewActor(name string, url string, onEvent func(Event), opts ...ActorOption) *Actor {
 	a := &Actor{
-		url:     url,
-		handler: handler,
-		timeout: 30 * time.Second,
+		BaseActor: sup.NewBaseActor(name),
+		url:       url,
+		onEvent:   onEvent,
+		timeout:   30 * time.Second,
 		client: &http.Client{
 			Transport: &http.Transport{
 				DisableKeepAlives: true,
@@ -80,15 +95,18 @@ func NewActor(url string, handler func(Event), opts ...ActorOption) *Actor {
 	return a
 }
 
-// Run establishes a connection to the SSE endpoint and processes incoming events until the context is canceled or an error occurs. It handles connection setup, event parsing, and error handling, while also notifying the Observer about connection status and received events.
-func (a *Actor) Run(ctx context.Context) (err error) {
-	if a.observer != nil {
-		a.observer.OnConnect(a.url, a.lastID)
-	}
+// LastEventID returns the ID of the last successfully received event.
+func (a *Actor) LastEventID() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.lastID
+}
 
+// Run establishes a connection to the SSE endpoint and processes incoming events until the context is canceled or an error occurs.
+func (a *Actor) Run(ctx context.Context) (err error) {
 	defer func() {
-		if err != nil && a.observer != nil {
-			a.observer.OnFailure(err)
+		if err != nil && a.onError != nil {
+			a.onError(err)
 		}
 	}()
 
@@ -97,11 +115,13 @@ func (a *Actor) Run(ctx context.Context) (err error) {
 		return err
 	}
 
+	lastID := a.LastEventID()
+
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Cache-Control", "no-cache")
 	req.Header.Set("Connection", "keep-alive")
-	if a.lastID != "" {
-		req.Header.Set("Last-Event-ID", a.lastID)
+	if lastID != "" {
+		req.Header.Set("Last-Event-ID", lastID)
 	}
 
 	client := a.client
@@ -116,20 +136,25 @@ func (a *Actor) Run(ctx context.Context) (err error) {
 	defer res.Body.Close()
 
 	if res.StatusCode != http.StatusOK {
-		return errors.New("unexpected status code: " + strconv.Itoa(res.StatusCode))
+		return fmt.Errorf("unexpected status code: %d", res.StatusCode)
+	}
+
+	if a.onConnect != nil {
+		a.onConnect(a.url, lastID)
 	}
 
 	scanner := bufio.NewScanner(res.Body)
-	var timedOut int32
+	const maxCapacity = 1024 * 1024
+	scanner.Buffer(make([]byte, 64*1024), maxCapacity)
 
+	var timedOut int32
 	var buf bytes.Buffer
-	var currentEvent Event
-	eventStart := time.Now()
+	currentEvent := Event{ID: lastID}
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil
 		default:
 		}
 
@@ -140,7 +165,6 @@ func (a *Actor) Run(ctx context.Context) (err error) {
 		})
 
 		ok := scanner.Scan()
-
 		timer.Stop()
 
 		if ok {
@@ -148,15 +172,15 @@ func (a *Actor) Run(ctx context.Context) (err error) {
 
 			if line == "" {
 				if buf.Len() > 0 {
-					currentEvent.Data = strings.TrimSpace(buf.String())
-					if a.observer != nil {
-						a.observer.OnEvent(currentEvent, time.Since(eventStart))
+					data := buf.String()
+					if data[len(data)-1] == '\n' {
+						data = data[:len(data)-1]
 					}
-					a.handler(currentEvent)
+					currentEvent.Data = data
+					a.onEvent(currentEvent)
 					buf.Reset()
-					eventStart = time.Now()
-					currentEvent = Event{ID: a.lastID}
 				}
+				currentEvent = Event{ID: a.LastEventID()}
 				continue
 			}
 
@@ -164,28 +188,37 @@ func (a *Actor) Run(ctx context.Context) (err error) {
 				continue
 			}
 
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) < 2 {
-				continue
+			var key, value string
+			if parts := strings.SplitN(line, ":", 2); len(parts) == 2 {
+				key = parts[0]
+				value = strings.TrimPrefix(parts[1], " ")
+			} else {
+				key = line
+				value = ""
 			}
 
-			key, partsValue := parts[0], strings.TrimPrefix(parts[1], " ")
 			switch key {
 			case "data":
-				buf.WriteString(partsValue)
-				buf.WriteString("\n")
+				buf.WriteString(value)
+				buf.WriteByte('\n')
 			case "event":
-				currentEvent.Name = partsValue
+				currentEvent.Name = value
 			case "id":
-				a.lastID = partsValue
-				currentEvent.ID = partsValue
+				if !strings.ContainsRune(value, 0) {
+					a.mu.Lock()
+					a.lastID = value
+					a.mu.Unlock()
+					currentEvent.ID = value
+				}
+			case "retry":
+				// Reconnection time is managed by the supervisor, but we parse it for completeness
 			}
 			continue
 		}
 
 		if err := scanner.Err(); err != nil {
 			if atomic.LoadInt32(&timedOut) == 1 {
-				return errors.New("sse stream timed out after " + a.timeout.String())
+				return fmt.Errorf("sse stream timed out after %v", a.timeout)
 			}
 			return err
 		}

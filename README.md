@@ -11,7 +11,6 @@
 * **Actor-Based Concurrency**: Thread-safe access to hardware. Multiple goroutines can call the actor safely; the actor handles the queue.
 * **Supervised Lifecycle**: Designed to run under a `sup.Supervisor`. If the connection drops, the actor returns a fatal error, allowing the supervisor to handle reconnection.
 * **Last-Event-ID**: Automatically tracks the last event ID and includes it in the `Last-Event-ID` header for reconnections.
-* **Rich Observability**: Built-in `Observer` interface to monitor events and errors.
 
 ## Quick start
 
@@ -35,11 +34,11 @@ func main() {
 		fmt.Println(event)
 	}
 	
-	actor := sse.NewActor("http://localhost:8080", handler,
+	actor := sse.NewActor("actor", "http://localhost:8080", handler,
 		sse.WithTimeout(10 * time.Second),
 	)
 
-	supervisor := sup.NewSupervisor(
+	supervisor := sup.NewSupervisor("root",
 		sup.WithActor(actor),
 		sup.WithPolicy(sup.Permanent),
 		sup.WithRestartDelay(time.Second),
@@ -76,11 +75,11 @@ func main() {
 		pubsub.Publish("sse", event)
 	}
   
-	actor := sse.NewActor("http://localhost:8080", handler,
+	actor := sse.NewActor("actor", "http://localhost:8080", handler,
 		sse.WithTimeout(10 * time.Second),
 	)
 
-	supervisor := sup.NewSupervisor(
+	supervisor := sup.NewSupervisor("root",
 		sup.WithActor(actor),
 		sup.WithPolicy(sup.Permanent),
 		sup.WithRestartDelay(time.Second),
