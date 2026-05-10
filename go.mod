@@ -1,5 +1,5 @@
 module github.com/webermarci/sup-sse
 
-go 1.26.2
+go 1.26.3
 
-require github.com/webermarci/sup v0.0.32
+require github.com/webermarci/sup v0.0.42
